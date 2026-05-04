@@ -1,0 +1,16 @@
+.zabbix-item-grid {
+    display: grid;
+    gap: 2px;
+}
+
+.js-drag-handle {
+    cursor: move;
+}
+
+.item-setting-row {
+    transition: background 0.2s;
+}
+
+.item-setting-row:hover {
+    background: #f0f0f0;
+}
