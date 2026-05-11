@@ -1,6 +1,6 @@
 <?php declare(strict_types = 0);
 
-namespace Modules\ZabbixItemGrid\Actions;
+namespace Modules\NewZabbixItemGrid\Actions;
 
 use API;
 use CControllerDashboardWidgetView;
@@ -14,9 +14,6 @@ class WidgetView extends CControllerDashboardWidgetView {
         $history_data = [];
         $json_names = $this->fields_values['custom_names_json'] ?? '{}';
         $custom_labels = json_decode($json_names, true) ?: [];
-        $color_graph = $this->fields_values['color_graph'] ?? '4794eb';
-        $color_frame = $this->fields_values['color_frame'] ?? '5a5a5a';
-        $color_bg = $this->fields_values['color_bg'] ?? '2f2f2f';
 
         $parser = new \CRelativeTimeParser();
         $from = $this->getInput('from', $this->fields_values['time_period']['from'] ?? 'now-1h');
@@ -36,6 +33,9 @@ class WidgetView extends CControllerDashboardWidgetView {
             $to_ts = strtotime($to) ?: $to_ts;
         }
 
+        $period = $to_ts - $from_ts;
+        $use_trends = ($period > 259200); // More than 3 days
+
         if ($itemids) {
             $items = \API::Item()->get([
                 'output' => ['itemid', 'name', 'lastvalue', 'lastclock', 'value_type', 'units'],
@@ -46,15 +46,29 @@ class WidgetView extends CControllerDashboardWidgetView {
             ]);
 
             foreach ($items as $itemid => $item) {
-                $hist = \API::History()->get([
-                    'history'   => $item['value_type'],
-                    'itemids'   => $itemid,
-                    'time_from' => $from_ts,
-                    'time_till' => $to_ts,
-                    'sortfield' => 'clock',
-                    'sortorder' => 'ASC',
-                    'limit'     => 5000
-                ]);
+                if ($use_trends && ($item['value_type'] == ITEM_VALUE_TYPE_FLOAT || $item['value_type'] == ITEM_VALUE_TYPE_UINT64)) {
+                    $hist = \API::Trend()->get([
+                        'itemids'   => $itemid,
+                        'time_from' => $from_ts,
+                        'time_till' => $to_ts,
+                        'sortfield' => 'clock',
+                        'sortorder' => 'ASC'
+                    ]);
+                    // Map trends to look like history for the view
+                    foreach ($hist as &$h) {
+                        $h['value'] = $h['value_avg'];
+                    }
+                } else {
+                    $hist = \API::History()->get([
+                        'history'   => $item['value_type'],
+                        'itemids'   => $itemid,
+                        'time_from' => $from_ts,
+                        'time_till' => $to_ts,
+                        'sortfield' => 'clock',
+                        'sortorder' => 'ASC',
+                        'limit'     => 5000
+                    ]);
+                }
                 $history_data[$itemid] = $hist;
             }
         }
@@ -68,9 +82,8 @@ class WidgetView extends CControllerDashboardWidgetView {
             'custom_labels' => $custom_labels,
             'from_ts' => $from_ts,
             'to_ts' => $to_ts,
-            'color_graph' => $color_graph,
-            'color_frame' => $color_frame,
-            'color_bg' => $color_bg,
+            'show_status' => (bool)($this->fields_values['show_status'] ?? 1),
+            'grid_count' => (int)($this->fields_values['grid_count'] ?? 4),
             'history_data' => $history_data
         ]));
     }

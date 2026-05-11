@@ -1,40 +1,38 @@
-<?php declare(strict_types = 0);
+<?php declare(strict_types=0);
 
-namespace Modules\ZabbixItemGrid\Includes;
+namespace Modules\NewZabbixItemGrid\Includes;
 
 use Zabbix\Widgets\{CWidgetField, CWidgetForm};
-use Zabbix\Widgets\Fields\{CWidgetFieldMultiSelectItem, CWidgetFieldTimePeriod, CWidgetFieldTextArea, CWidgetFieldTextBox, CWidgetFieldCheckBox, CWidgetFieldColor};
+use Zabbix\Widgets\Fields\{CWidgetFieldMultiSelectItem, CWidgetFieldTimePeriod, CWidgetFieldTextArea, CWidgetFieldIntegerBox, CWidgetFieldCheckBox};
 use CWidgetsData;
 
-class WidgetForm extends CWidgetForm {
+class WidgetForm extends CWidgetForm
+{
 
-    public function addFields(): self {
+    public function addFields(): self
+    {
         return $this
             ->addField(
-                new CWidgetFieldTextArea('custom_names_json')
-                    ->setMaxLength(65535) 
-            )
-            ->addField(
-                (new CWidgetFieldColor('color_graph', 'Graph color'))
-                    ->setDefault('4794eb')
-            )
-            ->addField(
-                (new CWidgetFieldColor('color_frame', 'Frame color'))
-                    ->setDefault('5a5a5a')
-            )
-            ->addField(
-                (new CWidgetFieldColor('color_bg', 'Background color'))
-                    ->setDefault('2f2f2f')
-            )
-           ->addField(
-                (new CWidgetFieldMultiSelectItem('itemids', 'Items'))
+                (new CWidgetFieldMultiSelectItem('itemids', 'Елементи'))
                     ->setFlags(CWidgetField::FLAG_NOT_EMPTY | CWidgetField::FLAG_LABEL_ASTERISK)
             )
             ->addField(
-                (new CWidgetFieldTimePeriod('time_period', 'Time period'))
+                (new CWidgetFieldCheckBox('show_status', 'Показувати статус (online/offline)'))
+                    ->setDefault(1)
+            )
+            ->addField(
+                (new CWidgetFieldIntegerBox('grid_count', 'Кількість блоків сітки', 0, 10))
+                    ->setDefault(2)
+            )
+            ->addField(
+                (new CWidgetFieldTextArea('custom_names_json', 'Мітки елементів'))
+            )
+            ->addField(
+                (new CWidgetFieldTimePeriod('time_period', 'Період часу'))
                     ->setDefault([
                         CWidgetField::FOREIGN_REFERENCE_KEY => CWidgetField::createTypedReference(
-                            CWidgetField::REFERENCE_DASHBOARD, CWidgetsData::DATA_TYPE_TIME_PERIOD
+                            CWidgetField::REFERENCE_DASHBOARD,
+                            CWidgetsData::DATA_TYPE_TIME_PERIOD
                         )
                     ])
                     ->setDefaultPeriod(['from' => 'now-1h', 'to' => 'now'])

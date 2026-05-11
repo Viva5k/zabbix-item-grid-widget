@@ -1,6 +1,6 @@
 <?php declare(strict_types = 0);
 
-namespace Modules\ZabbixItemGrid;
+namespace Modules\NewZabbixItemGrid;
 
 use Zabbix\Core\CWidget;
 

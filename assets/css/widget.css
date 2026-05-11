@@ -1,16 +1,259 @@
-.zabbix-item-grid {
+/* 1. СИСТЕМНЫЙ СБРОС (Только внешние рамки Zabbix) */
+.dashboard-grid-widget:has(.device-card-container) {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.dashboard-grid-widget:has(.device-card-container) .dashboard-grid-widget-head {
+    display: none !important;
+}
+
+.dashboard-grid-widget:has(.device-card-container) .dashboard-grid-widget-contents {
+    border: none !important;
+    background: transparent !important;
+}
+
+/* ТО САМОЕ ИСПРАВЛЕНИЕ ПО ТВОЕЙ ПОДСКАЗКЕ */
+.dashboard-grid-widget-header {
+    border: 0 !important;
+}
+
+/* 2. ГЛАВНЫЙ КОНТЕЙНЕР (Наш дизайн) */
+.device-card-container {
+    --card-bg: #1F2937;
+    --border-color: rgba(255, 255, 255, 0.15); /* Цвет как в Status List */
+    --text-primary: #F9FAFB;
+    --text-secondary: #9CA3AF;
+    --success: #10B981;
+    --danger: #EF4444;
+    
+    background-color: var(--card-bg) !important;
+    border-radius: 12px;
+    height: 100% !important;
+    width: 100% !important;
+    padding: 15px !important;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    
+    /* Убираем любые границы самого контейнера */
+    border: none !important;
+    margin: 0 !important;
+}
+
+/* 3. ШАПКА И ЗАГОЛОВОК */
+.card-header-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.1em;
+    margin-bottom: 12px;
+}
+
+.card-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    /* Header stripe: pull to container edges, add darker bg */
+    margin: -15px -15px 10px -15px;
+    padding: 12px 15px;
+    background: rgba(0, 0, 0, 0.25);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 12px 12px 0 0;
+}
+
+.card-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.card-dot.online {
+    background-color: var(--success);
+    box-shadow: 0 0 8px var(--success);
+}
+
+.card-dot.offline {
+    background-color: var(--danger);
+}
+
+.card-main-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.card-subtitle {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    margin-left: auto; /* pushes subtitle + badge to the right */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-badge {
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    /* no margin-left: auto — subtitle already does the push */
+}
+
+.status-badge.online {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success);
+}
+
+.status-badge.offline {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+}
+
+/* 4. СЕТКА (Квадраты) */
+.card-grid {
     display: grid;
-    gap: 2px;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 12px;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
 }
 
-.js-drag-handle {
-    cursor: move;
+.grid-block {
+    background: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px;
+    padding: 15px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 90px; /* Вернул более компактную высоту */
+    position: relative; /* ДЛЯ ПОЗИЦИОНИРОВАНИЯ ГРАФИКА */
+    overflow: hidden; /* Чтобы график не вылезал за скругленные углы */
 }
 
-.item-setting-row {
-    transition: background 0.2s;
+.grid-value, .grid-label {
+    position: relative;
+    z-index: 2; /* Поверх графика */
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5); /* Чтобы текст лучше читался на фоне графика */
 }
 
-.item-setting-row:hover {
-    background: #f0f0f0;
+.grid-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.grid-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.grid-sparkline-container {
+    position: absolute; /* full-height background sparkline */
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1; /* under text */
+    margin: 0;
+    opacity: 0.6;
+}
+
+/* 5. СПИСОК (Flex-ряды с разделителями) */
+.card-list-wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.card-list-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color); /* Линии между итемами */
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.card-list-row:last-child {
+    border-bottom: none;
+}
+
+/* ЗАГОЛОВКИ СЕКЦИЙ */
+.card-list-section-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    padding: 12px 0 6px 0;
+    border-bottom: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-list-section-header::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* НАЗВАНИЯ ИТЕМОВ */
+.col-list-label {
+    flex: 0 0 auto;
+    font-size: 13px;
+    color: var(--text-primary); /* Сделал белым, чтобы не сливалось с разделителями */
+    padding-right: 15px;
+    opacity: 0.85; /* Чуть-чуть приглушил, но всё равно белый */
+}
+
+.col-list-graph {
+    flex: 1;
+    height: 18px;
+    display: flex;
+    align-items: center;
+}
+
+.item-sparkline-container {
+    width: 100%;
+    height: 100%;
+    padding: 0 10px;
+    box-sizing: border-box;
+}
+
+.col-list-value {
+    flex: 0 0 auto;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: right;
+    padding-left: 15px;
+    min-width: 60px;
+}
+
+.item-sparkline {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Красная граница при офлайне */
+.device-card-container.is-down {
+    border-left: 4px solid var(--danger) !important;
+    background: linear-gradient(to right, rgba(239, 68, 68, 0.1), transparent) !important;
 }

@@ -2,23 +2,20 @@
 
 (new CWidgetFormView($data))
     ->addField(
-           new CWidgetFieldMultiSelectItemView($data['fields']['itemids'])
+        new CWidgetFieldMultiSelectItemView($data['fields']['itemids'])
+    )
+    ->addField(
+        new CWidgetFieldCheckBoxView($data['fields']['show_status'])
+    )
+    ->addField(
+        new CWidgetFieldIntegerBoxView($data['fields']['grid_count'])
     )
     ->addField(
         (new CWidgetFieldTextAreaView($data['fields']['custom_names_json']))
             ->addRowClass(ZBX_STYLE_DISPLAY_NONE)
     )
-    ->addField(
-        new CWidgetFieldColorView($data['fields']['color_graph'])
-    )
-    ->addField(
-        new CWidgetFieldColorView($data['fields']['color_frame'])
-    )
-        ->addField(
-        new CWidgetFieldColorView($data['fields']['color_bg'])
-    )
     ->addItem([
-         new CLabel('Label for element'),
+        new CLabel('Label for element'),
         new CFormField((new CDiv())->setId('custom-names-container'))
     ])
     ->addField(

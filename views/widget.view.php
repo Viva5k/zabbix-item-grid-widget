@@ -1,14 +1,9 @@
 <?php declare(strict_types = 0);
 
-$graph_color = '#' . ($data['color_graph'] !== '' ? $data['color_graph'] : '4794eb');
-$frame_color = '#' . ($data['color_frame'] !== '' ? $data['color_frame'] : '5a5a5a');
-$text_main_color = '#ffffff';
-$bg_block_color  = '#' . ($data['color_bg'] !== '' ? $data['color_bg'] : '2f2f2f');
-$bin_color_green = '#34af67';
-$bin_color_red   = '#e45959';
-$bin_color_grey  = 'rgba(171, 168, 168, 0.5)';
-$font_size_text = '10px';
-$font_size_header = '12px';
+/**
+ * @var CView $this
+ * @var array $data
+ */
 
 $convert_units = function($value, $unit) {
     if (!is_numeric($value)) {
@@ -32,181 +27,283 @@ $convert_units = function($value, $unit) {
     if (in_array($clean_unit, $units_to_convert) && $abs_val >= 1024) {
         $prefixes = ['','K','M','G','T','P'];
         $power = min(floor(log($abs_val, 1024)), count($prefixes) - 1);
-        
         $new_val = round($val / pow(1024, $power), 1);
         $new_unit = $prefixes[$power] . $clean_unit;
-        
         return ['value' => $new_val, 'unit' => $new_unit];
     }
 
     return ['value' => round($val, 1), 'unit' => $unit];
 };
 
-$grid_container = (new CDiv())
-    ->addClass('zabbix-item-grid')
-    ->setAttribute('style', '
-        display: grid; 
-        grid-template-columns: repeat(10, minmax(0, 1fr)); 
-        grid-auto-rows: 40px;
-        gap: 2px; 
-        padding: 10px; 
-        align-items: stretch;
-    ');
+// Хелпер для определения цвета по порогам
+$get_threshold_color = function($current_val, $max_val) {
+    $current = (float)$current_val;
+    $max = (float)$max_val;
+    if ($max <= 0) return '#10B981'; // Green
+
+    $percentage = ($current / $max) * 100;
+    if ($percentage >= 90) return '#EF4444'; // Red
+    if ($percentage >= 70) return '#F59E0B'; // Yellow
+    return '#10B981'; // Green
+};
+
+$render_sparkline = function($itemid, $max_val, $height = 30) use ($data, $get_threshold_color) {
+    if (!isset($data['history_data'][$itemid]) || empty($data['history_data'][$itemid])) {
+        return null;
+    }
+
+    $history = $data['history_data'][$itemid];
+    $values = array_column($history, 'value');
+    $clocks = array_column($history, 'clock');
+    $ts_start = (int)$data['from_ts'];
+    $ts_end = (int)$data['to_ts'];
+    $duration = max(1, $ts_end - $ts_start);
+    
+    $width = 250;
+    $padding = 2;
+    $count = count($values);
+    if ($count < 2) return null;
+
+    $min_val = 0; 
+    $range = max(1, (float)$max_val);
+
+    $points = [];
+    foreach ($history as $h) {
+        $x = (($h['clock'] - $ts_start) / $duration) * $width;
+        $y = $height - $padding - (( (float)$h['value'] - $min_val) / $range) * ($height - 2 * $padding);
+        $y = max($padding, min($height - $padding, $y)); 
+        $points[] = ['x' => round($x, 2), 'y' => round($y, 2)];
+    }
+
+    $path_line = "M" . $points[0]['x'] . "," . $points[0]['y'];
+    for ($i = 0; $i < count($points) - 1; $i++) {
+        $xc = ($points[$i]['x'] + $points[$i+1]['x']) / 2;
+        $yc = ($points[$i]['y'] + $points[$i+1]['y']) / 2;
+        $path_line .= " Q " . $points[$i]['x'] . "," . $points[$i]['y'] . " " . $xc . "," . $yc;
+    }
+    $path_line .= " L " . end($points)['x'] . "," . end($points)['y'];
+    $path_area = $path_line . " L{$width},{$height} L0,{$height} Z";
+
+    $last_val = (float)$data['items_data'][$itemid]['lastvalue'];
+    $color = $get_threshold_color($last_val, $max_val);
+
+    $svg = (new CTag('svg', true))
+        ->addClass('item-sparkline')
+        ->addClass('sparkline-svg')
+        ->setAttribute('viewBox', "0 0 $width $height")
+        ->setAttribute('preserveAspectRatio', 'none')
+        ->setAttribute('data-clocks', json_encode($clocks))
+        ->setAttribute('data-values', json_encode($values))
+        ->setAttribute('data-ts-start', $ts_start)
+        ->setAttribute('data-ts-end', $ts_end)
+        ->setAttribute('data-units', $data['items_data'][$itemid]['units'])
+        ->addItem([
+            (new CTag('path', true))
+                ->setAttribute('d', $path_area)
+                ->setAttribute('style', "fill: $color; fill-opacity: 0.1; stroke: none;"),
+            (new CTag('path', true))
+                ->setAttribute('d', $path_line)
+                ->setAttribute('style', "stroke: $color; stroke-width: 1.5; fill: none; stroke-linejoin: round;"),
+            (new CTag('line', true))
+                ->addClass('sparkline-crosshair')
+                ->setAttribute('x1', 0)->setAttribute('y1', 0)
+                ->setAttribute('x2', 0)->setAttribute('y2', $height)
+                ->setAttribute('style', "stroke: #ffffff; stroke-width: 1; display: none; pointer-events: none;")
+        ]);
+
+    return $svg;
+};
+
+$container = (new CDiv())->addClass('device-card-container');
 
 if (!empty($data['items_data'])) {
-    $configMap = [];
-    $ordered_ids = [];
-    if (is_array($data['custom_labels'])) {
-        foreach ($data['custom_labels'] as $conf) {
-            $id = $conf['i'] ?? $conf['id'] ?? null;
-            if ($id !== null) {
-                $strId = (string)$id;
-                $configMap[$strId] = $conf;
-                $ordered_ids[] = $strId;
+    $items_map = $data['items_data'];
+    $mixed_order = [];
+    $processed_ids = [];
+
+    if (isset($data['custom_labels']) && is_array($data['custom_labels'])) {
+        foreach ($data['custom_labels'] as $config) {
+            $id = (string)($config['i'] ?? '');
+            if (isset($config['t']) && $config['t'] === 'header') {
+                $mixed_order[] = ['type' => 'header', 'name' => $config['n']];
+            } elseif ($id !== '' && isset($items_map[$id])) {
+                $mixed_order[] = ['type' => 'item', 'id' => $id, 'data' => $items_map[$id], 'config' => $config];
+                $processed_ids[] = $id;
             }
         }
     }
-    foreach (array_keys($data['items_data']) as $id) {
-        $strId = (string)$id;
-        if (!isset($configMap[$strId])) {
-            $ordered_ids[] = $strId;
-            $configMap[$strId] = [];
+
+    foreach ($items_map as $id => $item) {
+        if (!in_array((string)$id, $processed_ids)) {
+            $mixed_order[] = ['type' => 'item', 'id' => (string)$id, 'data' => $item, 'config' => []];
         }
     }
-    foreach ($ordered_ids as $itemid) {
-        if (!isset($data['items_data'][$itemid])) continue;
-        $item = $data['items_data'][$itemid];
-        $config = $configMap[(string)$itemid] ?? [];
 
-        $conf_name = $config['n'] ?? $config['name'] ?? '';
-        $display_name = ($conf_name !== '') ? $conf_name : $item['name'];
-
-       if (isset($config['g'])) {
-            $show_graph = ($config['g'] !== false);
-        } elseif (isset($config['graphs'])) {
-            $show_graph = ($config['graphs'] !== false);
-        } else {
-            $show_graph = true;
+    // Prepare groups for Grid and List
+    $final_entities = [];
+    $i = 0;
+    while ($i < count($mixed_order)) {
+        $entity = $mixed_order[$i];
+        
+        if ($entity['type'] === 'header') {
+            $final_entities[] = $entity;
+            $i++;
+            continue;
         }
 
-        $is_binary = !empty($config['b']) || !empty($config['binary']);
-        $manual_max = $config['m'] ?? $config['max_value'] ?? '';
-        $grid_span = isset($config['w']) ? (int)$config['w'] : (isset($config['width']) ? (int)$config['width'] : 1);
-        $grid_span_row = isset($config['h']) ? (int)$config['h'] : (isset($config['height']) ? (int)$config['height'] : 1);
+        // It's an item, handle Join logic
+        $item_entry = $entity;
+        $group = [
+            'type' => 'item_group',
+            'name' => (!empty($item_entry['config']['n'])) ? $item_entry['config']['n'] : $item_entry['data']['name'],
+            'is_online' => ((float)$item_entry['data']['lastvalue'] > 0),
+            'last_value_raw' => (float)$item_entry['data']['lastvalue'],
+            'values' => [],
+            'graph_id' => (isset($item_entry['config']['g']) && $item_entry['config']['g']) ? $item_entry['id'] : null,
+            'max_val' => (float)(!empty($item_entry['config']['m']) ? $item_entry['config']['m'] : 100)
+        ];
+        
+        $conv = $convert_units($item_entry['data']['lastvalue'], $item_entry['data']['units']);
+        $group['values'][] = $conv['value'] . $conv['unit'];
+        
+        while (isset($mixed_order[$i]['config']['j']) && $mixed_order[$i]['config']['j'] == true && isset($mixed_order[$i+1]) && $mixed_order[$i+1]['type'] === 'item') {
+            $i++;
+            $next_item = $mixed_order[$i];
+            $group['max_val'] = (float)$next_item['data']['lastvalue'];
+            if ($group['graph_id'] === null && isset($next_item['config']['g']) && $next_item['config']['g']) {
+                $group['graph_id'] = $next_item['id'];
+            }
+            $conv = $convert_units($next_item['data']['lastvalue'], $next_item['data']['units']);
+            $group['values'][] = $conv['value'] . $conv['unit'];
+        }
+        
+        $final_entities[] = $group;
+        $i++;
+    }
 
-        $final_value = $item['lastvalue'];
-        $final_units = $item['units'];
-        if (!empty($item['valuemap']) && !empty($item['valuemap']['mappings'])) {
-            foreach ($item['valuemap']['mappings'] as $mapping) {
-                if ($mapping['value'] == $item['lastvalue']) {
-                    $final_value = $mapping['newvalue'];
+    if (!empty($final_entities)) {
+        // Find first item group (title) and second (subtitle)
+        $first_item = null;
+        $subtitle_item = null;
+        $subtitle_idx = -1;
+        $item_found_count = 0;
+        foreach ($final_entities as $idx => $ent) {
+            if ($ent['type'] === 'item_group') {
+                $item_found_count++;
+                if ($item_found_count === 1) {
+                    $first_item = $ent;
+                } elseif ($item_found_count === 2) {
+                    $subtitle_item = $ent;
+                    $subtitle_idx = $idx;
                     break;
                 }
             }
         }
-        $converted = $convert_units($final_value, $final_units);
-        $final_value = $converted['value'];
-        $final_units = $converted['unit'];
+        
+        if ($first_item && !$first_item['is_online']) $container->addClass('is-down');
 
-        $base_style = "
-            position: relative;
-            box-sizing: border-box; 
-            width: 100%; height: 100%; 
-            border-radius: 2px; border: 1px solid {$frame_color}; 
-            background: {$bg_block_color}; color: {$text_main_color};
-            box-shadow: 0 1px 2px rgba(0,0,0,0.3); 
-            overflow: hidden; 
-        ";
-        if (!$show_graph) {
-            $base_style .= "display: flex; flex-direction: column; justify-content: center;";
+        $title_row = (new CDiv())->addClass('card-title-row');
+        if ((bool)$data['show_status']) {
+            $status_class = ($first_item && $first_item['is_online']) ? 'online' : 'offline';
+            $title_row->addItem((new CDiv())->addClass('card-dot')->addClass($status_class));
         }
-        
-        $grid_style = "grid-column: span {$grid_span}; grid-row: span {$grid_span_row};";
-        $item_div = (new CDiv())->setAttribute('style', $base_style . $grid_style);
-        
-        if ($show_graph) {
-            $history = $data['history_data'][$itemid] ?? [];
-            $values = array_column($history, 'value');
+        $main_name = $first_item ? $first_item['name'] : $data['name'];
+        $title_row->addItem((new CDiv($main_name))->addClass('card-main-title'));
+        if ($subtitle_item !== null) {
+            $subtitle_val = implode(' / ', $subtitle_item['values']);
+            $title_row->addItem((new CDiv($subtitle_val))->addClass('card-subtitle'));
+        }
+        if ((bool)$data['show_status']) {
+            $status_class = ($first_item && $first_item['is_online']) ? 'online' : 'offline';
+            $title_row->addItem((new CDiv($status_class))->addClass('status-badge')->addClass($status_class));
+        }
+        $container->addItem($title_row);
 
-            if (!empty($values)) {
-                $width = 400; $height = 100;
-                $count = count($values);
-                $step = ($count > 1) ? $width / ($count - 1) : 0;
-                $svg_content = [];
-                if ($is_binary) {
-                    $y_up = 15; $y_down = $height - 2;
-                    $path_green = ""; $path_red = ""; $path_grey = ""; $path_fill = "";
-                    for ($i = 0; $i < $count - 1; $i++) {
-                        $v1 = (float)$values[$i];
-                        $x1 = round($i * $step, 2); $x2 = round(($i + 1) * $step, 2);
-                        $y1 = ($v1 > 0) ? $y_up : $y_down;
-                        $y2 = ((float)$values[$i+1] > 0) ? $y_up : $y_down; 
-                        if ($v1 > 0) { $path_green .= "M{$x1},{$y1} L{$x2},{$y1} "; $path_fill .= "M{$x1},{$height} L{$x1},{$y1} L{$x2},{$y1} L{$x2},{$height} Z "; }
-                        else { $path_red .= "M{$x1},{$y1} L{$x2},{$y1} "; }
-                        if ($y1 !== $y2) $path_grey .= "M{$x2},{$y1} L{$x2},{$y2} ";
-                    }
-                    if ($path_fill !== "") $svg_content[] = (new CTag('path', true))->setAttribute('d', $path_fill)->setAttribute('style', "fill: rgba(52, 175, 103, 0.15); stroke: none;");
-                    if ($path_grey !== "") $svg_content[] = (new CTag('path', true))->setAttribute('d', $path_grey)->setAttribute('style', "stroke: {$bin_color_grey}; stroke-width: 1; fill: none;");
-                    if ($path_red !== "") $svg_content[] = (new CTag('path', true))->setAttribute('d', $path_red)->setAttribute('style', "stroke: {$bin_color_red}; stroke-width: 2; fill: none;");
-                    if ($path_green !== "") $svg_content[] = (new CTag('path', true))->setAttribute('d', $path_green)->setAttribute('style', "stroke: {$bin_color_green}; stroke-width: 2; fill: none;");
-                } else {
-                    $min = min($values); 
-                    $max = max($values);
-                    $unit_clean = trim($final_units); 
-                    $scale_min = ($min < 0) ? $min * 1.1 : 0;
-                    
-                    if (is_numeric($manual_max) && (float)$manual_max > 0) {
-                        $user_max = (float)$manual_max;
-                        $scale_max = ($max > $user_max) ? $max * 1.1 : $user_max;
-                    } else {
-                        if ($unit_clean === '%') {
-                            $scale_max = 100;
-                        } elseif ($unit_clean === '°C' || $unit_clean === 'C') {
-                            $threshold = 50;
-                            $scale_max = ($max > $threshold) ? $max * 1.1 : $threshold;
-                        } else {
-                            $scale_max = ($max > 0) ? $max * 1.2 : 10;
-                        }
-                    }
-                    
-                    $scale_diff = $scale_max - $scale_min;
-                    $start_y = $height - (($values[0] - $scale_min) / $scale_diff) * $height;
-                    $path = "M0,{$start_y} ";
-                    for ($i = 0; $i < $count - 1; $i++) {
-                        $x2 = round(($i + 1) * $step, 2);
-                        $y2 = $height - (($values[$i+1] - $scale_min) / $scale_diff) * $height;
-                        $path .= "L{$x2},{$y2} ";
-                    }
-                    $svg_content[] = (new CTag('path', true))
-                        ->setAttribute('d', $path . " L{$width},{$height} L0,{$height} Z")
-                        ->setAttribute('style', "fill: {$graph_color}; fill-opacity: 0.25; stroke: none;");
-                    $svg_content[] = (new CTag('path', true))
-                        ->setAttribute('d', $path)
-                        ->setAttribute('style', "stroke: {$graph_color}; stroke-width: 1.5; fill: none;");
-                    
-                    $val_div = (new CDiv())->setAttribute('style', 'position: absolute; top: 0; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; align-items: center; z-index: 3; ');
-                    $val_div->addItem([(new CSpan($final_value))->setAttribute('style', "font-size: {$font_size_header}; font-weight: bold; margin-right: 3px;"), (new CSpan($final_units))->setAttribute('style', "font-size: {$font_size_header}; font-weight: bold; color: {$text_main_color}")]);
-                    $item_div->addItem($val_div);
-                }
-                $svg = (new CTag('svg', true))->setAttribute('width', '100%')->setAttribute('height', '100%')->setAttribute('viewBox', "0 0 $width $height")->setAttribute('preserveAspectRatio', 'none')->addItem($svg_content);
-                $item_div->addItem((new CDiv($svg))->setAttribute('style', 'position: absolute; top: 0; left: 0; bottom: 0; right: 0; z-index: 1;'));
-                
-                $name_div = (new CDiv($display_name))->setAttribute('style', "
-                position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; 
-                font-size: {$font_size_text}; color: {$text_main_color}; 
-                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 15px; z-index: 3; ");
-                $item_div->addItem($name_div);
+        $grid_count = (int)$data['grid_count'];
+        $grid_items_added = 0;
+        
+        // Remove entities that go to Grid
+        $remaining_entities = [];
+        $grid_div = (new CDiv())->addClass('card-grid');
+        $has_grid = false;
+
+        $first_item_skipped = false;
+        foreach ($final_entities as $idx => $ent) {
+            if ($ent['type'] === 'item_group' && !$first_item_skipped) {
+                $first_item_skipped = true;
+                continue;
             }
-        } else {
-            $row_div = (new CDiv())->setAttribute('style', 'display: flex; justify-content: center; align-items: center; flex-wrap: wrap; width: 100%; height: 100%; padding: 0 10px; box-sizing: border-box; text-align: center; gap: 6px;');
-            $row_div->addItem((new CDiv($display_name))->setAttribute('style', "font-size: {$font_size_text};max-width: 100%;color: {$text_main_color};"));
-            $row_div->addItem((new CDiv($final_value . $final_units))->setAttribute('style', "font-size: {$font_size_text};max-width: 100%; color: {$text_main_color};"));
-            $item_div->addItem($row_div);
+            if ($subtitle_item !== null && $idx === $subtitle_idx) {
+                continue;
+            }
+
+            if ($grid_items_added < $grid_count && $ent['type'] === 'item_group') {
+                $block = (new CDiv())->addClass('grid-block');
+                $val_text = implode(' / ', $ent['values']);
+                
+                // ОПРЕДЕЛЯЕМ ЦВЕТ (Только если есть график!)
+                $v_style = "";
+                if ($ent['graph_id'] !== null) {
+                    $v_color = $get_threshold_color($ent['last_value_raw'], $ent['max_val']);
+                    $v_style = "color: $v_color;";
+                }
+                
+                $block->addItem((new CDiv($val_text))->addClass('grid-value')->setAttribute('style', $v_style));
+                $block->addItem((new CDiv($ent['name']))->addClass('grid-label'));
+                
+                if ($ent['graph_id']) {
+                    $spark = $render_sparkline($ent['graph_id'], $ent['max_val'], 60);
+                    if ($spark) {
+                        $block->addItem((new CDiv($spark))->addClass('grid-sparkline-container'));
+                    }
+                }
+                $grid_div->addItem($block);
+                $grid_items_added++;
+                $has_grid = true;
+            } else {
+                $remaining_entities[] = $ent;
+            }
         }
-        $grid_container->addItem($item_div);
+        
+        if ($has_grid) $container->addItem($grid_div);
+
+        if (!empty($remaining_entities)) {
+            $list_container = (new CDiv())->addClass('card-list-wrapper');
+            foreach ($remaining_entities as $ent) {
+                if ($ent['type'] === 'header') {
+                    $list_container->addItem((new CDiv($ent['name']))->addClass('card-list-section-header'));
+                    continue;
+                }
+                
+                $val_text = implode(' / ', $ent['values']);
+                $row = (new CDiv())->addClass('card-list-row');
+                $row->addItem((new CDiv($ent['name']))->addClass('col-list-label'));
+                
+                $graph_container = (new CDiv())->addClass('col-list-graph');
+                if ($ent['graph_id']) {
+                    $spark = $render_sparkline($ent['graph_id'], $ent['max_val'], 18);
+                    if ($spark) {
+                        $graph_container->addItem((new CDiv($spark))->addClass('item-sparkline-container'));
+                    }
+                }
+                $row->addItem($graph_container);
+                
+                // ОПРЕДЕЛЯЕМ ЦВЕТ (Только если есть график!)
+                $v_style = "";
+                if ($ent['graph_id'] !== null) {
+                    $v_color = $get_threshold_color($ent['last_value_raw'], $ent['max_val']);
+                    $v_style = "color: $v_color;";
+                }
+                
+                $row->addItem((new CDiv($val_text))->addClass('col-list-value')->setAttribute('style', $v_style));
+                
+                $list_container->addItem($row);
+            }
+            $container->addItem($list_container);
+        }
     }
 } else {
-    $grid_container = (new CTableInfo())->setNoDataMessage('No data');
+    $container->addItem((new CTableInfo())->setNoDataMessage('No items selected'));
 }
 
-(new CWidgetView($data))->addItem($grid_container)->show();
+(new CWidgetView($data))->addItem($container)->show();
